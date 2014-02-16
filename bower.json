@@ -1,17 +1,6 @@
 {
   "name": "angular-chessboard",
   "version": "0.0.1",
-  "homepage": "https://github.com/theborakompanioni/bower-angular-chessboard",
-  "authors": [
-    "tbk <theborakompanioni@gmail.com>"
-  ],
-  "description": "Chess Board Directive for AngularJS",
-  "main": "./chessboard.js",
-  "keywords": [
-    "chess",
-    "board"
-  ],
-  "license": "MIT",  
   "dependencies": {
     "angular": "~1.2.13",
     "chessboard.js": "~0.3.2",
