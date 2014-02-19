@@ -3,7 +3,7 @@
   
   angular.module('nywton.chessboard', [])
   
-  .value('nywtonChessDefaultConfig', {
+  .value('nywtonChessboardDefaultConfig', {
     position: undefined,
     showNotation: true,
     orientation: 'white',
@@ -14,6 +14,9 @@
     snapbackSpeed: 50,
     snapSpeed: 25,
     trashSpeed: 100,
+    sparePieces:false,
+    showErrors: false,
+    pieceTheme: undefined, // defaults to 'img/chesspieces/wikipedia/{piece}.png'
     onDragStart: angular.noop,
     onDrop: angular.noop,
     onSnapEnd: angular.noop,
@@ -25,7 +28,8 @@
     onMouseoverSquare: angular.noop,
   })
   
-  .provider('nywtonChessConfig', [function NywtonChessConfigProvider() {
+  // TODO: all attributes should be configurable
+  .provider('nywtonChessboardConfig', [function NywtonChessboardConfigProvider() {
     var config = {};
     
     this.pieceTheme = function pieceThemeF(pieceTheme) {
@@ -40,22 +44,25 @@
       config.draggable = draggable;
       return this;
     };
+    this.sparePieces = function sparePiecesF(sparePieces) {
+      config.sparePieces = sparePieces;
+      return this;
+    };
   
-    this.$get = ['nywtonChessDefaultConfig', function unicornLauncherFactory(defaultConfig) {
+    this.$get = ['nywtonChessboardDefaultConfig', function getF(defaultConfig) {
       return angular.extend(defaultConfig, config);
     }];
   }])
   
-  .config(['nywtonChessConfigProvider', function nywtonChessConfigConfig(nywtonChessConfigProvider) {
-    nywtonChessConfigProvider.draggable(true).position('start');
+  .config(['nywtonChessboardConfigProvider', function nywtonChessboardConfigProviderConfig(configProvider) {
+    configProvider.position('empty');
   }])
   
-  
-  .directive('chessboard', [
+  .directive('nywtonChessboard', [
     '$window',
     '$log',
     '$timeout',
-    'nywtonChessConfig',
+    'nywtonChessboardConfig',
     function($window, $log, $timeout, nywtonChessConfig) {
       var _configAttrs = [
         'draggable',
@@ -99,17 +106,12 @@
           onMouseoutSquare: '&',
           onMouseoverSquare: '&',
           onSnapEnd: '&',
-          // workaround for onDragStart
-          // angular does not like the 'start' at the end..
-          // $scope['onDragStart']() === undefined;
-          // i really dont know why.. onclick may not be taken..
-          // ok.. i get that.. but i could not find any documentation
-          // on this behaviour...
-          onDragStart:'&onDragStartCb', // workaround because angular does not like 'onDragStart'
+          // workaround because angular does not like 'onDragStart'
+          onDragStart:'&onDragStartCb',
         },
         priority: 1000,
         template: '<div></div>',
-        controller: ['$scope', function chessboard($scope) {
+        controller: ['$scope', function NywtonChessboardCtrl($scope) {
           var $ctrl = this;
           var _cfg = [];
           
@@ -136,24 +138,37 @@
           };
           
           var defaultCallback = function defaultCallbackF() {
-            // calling $digest() because the methods
-            // are invoked from external lib
+            // calling $digest() because callbacks are invoked from external lib
             $scope.$parent.$digest();
           };
+          
+          // TODO: make this configurable
+          // calling $digest on e.g. 'onMouseoverSquare'
+          // may is overkill in some applications
+          var invokeDigestOnCallbacks = true;
+          var applyWrapper = function applyWrapperF(func) {
+            return function wrappedApplyInvokation() {
+              var args = Array.prototype.slice.call(arguments, 1);
+              return $scope.$parent.$apply(func.apply(this, args));
+            };
+          };
     
+          // callback attributes e.g. on-mouse-square="myCallback"
           angular.forEach(_callbackAttrs, function(attr) {
             if(angular.isFunction($scope[attr])) {
               var expressionHandler = $scope[attr]();
-              if(!angular.isFunction(expressionHandler)) {
-                // push default callback if attr was not specified
+              // check if callback is a function (or given at all)
+              if(angular.isFunction(expressionHandler)) {
+                // wrap in an $apply() call if needed
+                var callback = invokeDigestOnCallbacks ? applyWrapper(expressionHandler) : expressionHandler;
+                $ctrl.config_push([attr, callback]);
+              }
+              // otherwise push the default callback calling $digest
+              else {
                 $ctrl.config_push([attr, defaultCallback]);
-              } else {
-                $log.debug('callback attr: ' + attr + ' = ' + expressionHandler);
-                $ctrl.config_push([attr, expressionHandler]);
               }
             }
           });
-          
         }],
         link: function link($scope, $element, $attrs, $ctrl) {
           angular.forEach(_configAttrs, function(attr) {
@@ -164,11 +179,15 @@
           });
           
           var board_config = $ctrl.config();
-          var board_element = angular.element('<div></div>')[0];
+          var board_element = angular.element('<div></div>');
           $element.prepend(board_element);
           
           $scope.board = new $window.ChessBoard(board_element, board_config);
           $scope.board.name = $scope.name || 'board' + $scope.$id;
+          
+          $scope.$on('$destroy', function onDestroyF() {
+            $scope.board.destroy();
+          });
         },
       };
       
@@ -176,14 +195,13 @@
     }
   ])
   
-  .directive('positionRuyLopez', ['$log', function($log) {
+  .directive('nywtonPositionRuyLopez', [function() {
 
     var directive = {
       restrict: 'A',
       priority: 1,
-      require: 'chessboard',
+      require: 'nywtonChessboard',
       link: function link($scope, $element, $attrs, $ctrl) {
-        $log.debug('pushing config "position" with Ruy Lopez fen-string');
         $ctrl.config_push(['position', 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R']);
       },
     };
@@ -191,15 +209,38 @@
     return directive;
   }])
 
-  .directive('positionStart', ['$log', function($log) {
-
+  .directive('nywtonPositionStart', [function() {
     var directive = {
       restrict: 'A',
       priority: 1,
-      require: 'chessboard',
+      require: 'nywtonChessboard',
       link: function link($scope, $element, $attrs, $ctrl) {
-        $log.debug('pushing config "position" with start position');
         $ctrl.config_push(['position', 'start']);
+      },
+    };
+    
+    return directive;
+  }])
+  
+  .directive('nywtonChessboardAutoresize', ['$window','$timeout', function($window, $timeout) {
+    var directive = {
+      restrict: 'A',
+      priority: 1,
+      require: 'nywtonChessboard',
+      link: function link($scope, $element, $attrs, $ctrl) {
+        var resizeBoard = function resizeBoardF() {
+          if(angular.isDefined($ctrl.board())) {
+            $ctrl.board().resize();
+          }
+        };
+        var resizeTimeoutPromise;
+        angular.element($window).bind('resize', function() {
+          $timeout.cancel(resizeTimeoutPromise);
+          resizeTimeoutPromise = $timeout(resizeBoard, 113);
+        });
+        $scope.$on('$destroy', function onDestroyF() {
+          $timeout.cancel(resizeTimeoutPromise);
+        });
       },
     };
     
